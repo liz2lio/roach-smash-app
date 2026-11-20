@@ -6,7 +6,7 @@
     name="viewport"
     content="width=device-width, initial-scale=1, viewport-fit=cover"
   >
-  <title>ROACH SMASH! — Camera Swarm</title>
+  <title>ROACH SMASH! — Camera Game</title>
 
   <style>
     * {
@@ -115,6 +115,7 @@
       color: #161323;
       font-size: 23px;
       font-weight: bold;
+      cursor: pointer;
     }
 
     button:disabled {
@@ -132,7 +133,7 @@
 
   <canvas
     id="game"
-    aria-label="Swipe across swarms of cockroaches in the camera view"
+    aria-label="Swipe across cockroaches over the camera view"
   ></canvas>
 
   <div id="hud">
@@ -147,8 +148,8 @@
     <div id="panel">
       <h1 id="panel-title">ROACH SMASH!</h1>
       <p id="panel-description">
-        Cockroaches arrive in swarms over your camera view.
-        Swipe quickly across them! Smashing one makes nearby roaches scatter.
+        Roaches appear across your camera view. Swipe quickly across
+        them to smash them! Nearby roaches scatter after a hit.
       </p>
       <p id="status">
         Tap START and allow camera access.
@@ -177,7 +178,7 @@
 
     const ROUND_SECONDS = 60;
     const STARTING_LIVES = 3;
-    const SWARM_INTERVAL = 4.2;
+    const SPAWN_INTERVAL = 4.2;
     const MAX_ROACHES = 12;
     const HIT_COOLDOWN_MS = 300;
     const MAX_SAMPLE_GAP_MS = 180;
@@ -192,7 +193,7 @@
     let score = 0;
     let lives = STARTING_LIVES;
     let secondsLeft = ROUND_SECONDS;
-    let swarmClock = 0;
+    let spawnClock = 0;
     let roaches = [];
     let splats = [];
 
@@ -203,6 +204,18 @@
     let lastHit = -HIT_COOLDOWN_MS;
     let messageUntil = 0;
     let lastFrame = performance.now();
+
+    function randomBetween(min, max) {
+      return min + Math.random() * (max - min);
+    }
+
+    function playTop() {
+      return Math.min(120, height * 0.22);
+    }
+
+    function roachRadius() {
+      return Math.max(18, Math.min(width, height) * 0.043);
+    }
 
     function resize() {
       const oldWidth = width;
@@ -239,82 +252,62 @@
     window.addEventListener("resize", resize);
     resize();
 
-    function playTop() {
-      return Math.min(120, height * 0.22);
-    }
-
-    function roachRadius() {
-      return Math.max(18, Math.min(width, height) * 0.043);
-    }
-
-    function randomBetween(min, max) {
-      return min + Math.random() * (max - min);
-    }
-
     function updateHud() {
       scoreText.textContent = `Score: ${score}`;
       timerText.textContent = `${Math.ceil(secondsLeft)}s`;
       livesText.textContent = `Lives: ${Math.max(0, lives)}`;
     }
 
-    function spawnSwarm() {
+    function spawnSpreadOutRoaches() {
       const available = MAX_ROACHES - roaches.length;
       if (available <= 0) return;
 
       const radius = roachRadius();
       const top = playTop();
-      if (width < radius * 4 || height - top < radius * 5) return;
+      const bottom = height - radius - 12;
 
-      // One shared starting area and direction makes this a visible group.
-      const edge = Math.floor(Math.random() * 4);
-      const count = Math.min(available, Math.floor(randomBetween(3, 6)));
-      const speed = Math.max(42, Math.min(width, height) * 0.14);
-      const spacing = radius * 1.35;
+      if (width < radius * 4 || bottom < top + radius * 3) {
+        return;
+      }
 
-      const centreX = randomBetween(radius * 2, width - radius * 2);
-      const centreY = randomBetween(
-        top + radius * 2,
-        height - radius * 2
+      const count = Math.min(
+        available,
+        Math.floor(randomBetween(3, 6))
       );
 
+      // Divide the play area into cells so new roaches start apart.
+      const columns = Math.ceil(Math.sqrt(count));
+      const rows = Math.ceil(count / columns);
+      const cellWidth = width / columns;
+      const cellHeight = (bottom - top) / rows;
+
       for (let i = 0; i < count; i++) {
-        const offset = (i - (count - 1) / 2) * spacing;
-        const jitter = randomBetween(-radius * 0.25, radius * 0.25);
+        const column = i % columns;
+        const row = Math.floor(i / columns);
 
-        let x;
-        let y;
-        let vx;
-        let vy;
+        const x = Math.max(
+          radius,
+          Math.min(
+            width - radius,
+            (column + randomBetween(0.25, 0.75)) * cellWidth
+          )
+        );
 
-        if (edge === 0) {
-          x = -radius - randomBetween(0, radius * 0.6);
-          y = Math.max(top + radius, Math.min(
-            height - radius, centreY + offset + jitter
-          ));
-          vx = speed;
-          vy = randomBetween(-speed * 0.12, speed * 0.12);
-        } else if (edge === 1) {
-          x = width + radius + randomBetween(0, radius * 0.6);
-          y = Math.max(top + radius, Math.min(
-            height - radius, centreY + offset + jitter
-          ));
-          vx = -speed;
-          vy = randomBetween(-speed * 0.12, speed * 0.12);
-        } else if (edge === 2) {
-          x = Math.max(radius, Math.min(
-            width - radius, centreX + offset + jitter
-          ));
-          y = top - radius - randomBetween(0, radius * 0.6);
-          vx = randomBetween(-speed * 0.12, speed * 0.12);
-          vy = speed;
-        } else {
-          x = Math.max(radius, Math.min(
-            width - radius, centreX + offset + jitter
-          ));
-          y = height + radius + randomBetween(0, radius * 0.6);
-          vx = randomBetween(-speed * 0.12, speed * 0.12);
-          vy = -speed;
-        }
+        const y = Math.max(
+          top + radius,
+          Math.min(
+            bottom - radius,
+            top + (row + randomBetween(0.25, 0.75)) * cellHeight
+          )
+        );
+
+        const angle = randomBetween(0, Math.PI * 2);
+        const movementSpeed = Math.max(
+          35,
+          Math.min(width, height) * randomBetween(0.09, 0.15)
+        );
+        const vx = Math.cos(angle) * movementSpeed;
+        const vy = Math.sin(angle) * movementSpeed;
 
         roaches.push({
           x,
@@ -331,13 +324,17 @@
     }
 
     async function startCamera() {
-      if (stream) return;
+      if (stream && stream.getVideoTracks().some(
+        track => track.readyState === "live"
+      )) {
+        return;
+      }
 
       if (!window.isSecureContext ||
           !navigator.mediaDevices?.getUserMedia) {
         throw new Error(
           "Camera access requires HTTPS and a supported browser. " +
-          "Open the GitHub Pages link directly in Safari or Chrome."
+          "Open the GitHub Pages link directly on your device."
         );
       }
 
@@ -357,9 +354,10 @@
       score = 0;
       lives = STARTING_LIVES;
       secondsLeft = ROUND_SECONDS;
-      swarmClock = 0;
+      spawnClock = 0;
       roaches = [];
       splats = [];
+
       activePointerId = null;
       previousPoint = null;
       previousTime = null;
@@ -367,7 +365,7 @@
       lastHit = -HIT_COOLDOWN_MS;
       message.style.opacity = "0";
 
-      spawnSwarm();
+      spawnSpreadOutRoaches();
       updateHud();
       overlay.classList.add("hidden");
     }
@@ -380,7 +378,7 @@
       panelDescription.textContent =
         `Final score: ${score}. Tap below to play again.`;
       statusText.textContent =
-        "These swarms move over the camera image; " +
+        "These roaches are overlaid on the camera image; " +
         "they are not anchored to the room.";
       startButton.textContent = "PLAY AGAIN";
       overlay.classList.remove("hidden");
@@ -405,6 +403,7 @@
 
     function pointFromEvent(event) {
       const rect = canvas.getBoundingClientRect();
+
       return {
         x: event.clientX - rect.left,
         y: event.clientY - rect.top
@@ -420,11 +419,16 @@
         return Math.hypot(point.x - a.x, point.y - a.y);
       }
 
-      const amount = Math.max(0, Math.min(
-        1,
-        ((point.x - a.x) * dx + (point.y - a.y) * dy) /
-        lengthSquared
-      ));
+      const amount = Math.max(
+        0,
+        Math.min(
+          1,
+          (
+            (point.x - a.x) * dx +
+            (point.y - a.y) * dy
+          ) / lengthSquared
+        )
+      );
 
       return Math.hypot(
         point.x - (a.x + amount * dx),
@@ -434,7 +438,10 @@
 
     function scatterNearby(hitX, hitY) {
       const range = roachRadius() * 6;
-      const impulse = Math.max(90, Math.min(width, height) * 0.38);
+      const impulse = Math.max(
+        90,
+        Math.min(width, height) * 0.38
+      );
 
       for (const roach of roaches) {
         const dx = roach.x - hitX;
@@ -443,7 +450,6 @@
 
         if (distance >= range) continue;
 
-        // Give overlapping roaches a direction too.
         const angle = distance < 1
           ? randomBetween(0, Math.PI * 2)
           : Math.atan2(dy, dx);
@@ -468,7 +474,9 @@
 
     canvas.addEventListener("pointermove", (event) => {
       if (state !== "playing" ||
-          event.pointerId !== activePointerId) return;
+          event.pointerId !== activePointerId) {
+        return;
+      }
 
       event.preventDefault();
 
@@ -482,6 +490,7 @@
       }
 
       const elapsedMs = now - previousTime;
+
       if (elapsedMs <= 0 || elapsedMs > MAX_SAMPLE_GAP_MS) {
         previousPoint = current;
         previousTime = now;
@@ -493,220 +502,4 @@
         current.y - previousPoint.y
       );
       const speed = movement / (elapsedMs / 1000);
-      const minimumSpeed = Math.max(
-        300, Math.min(width, height) * 1.8
-      );
-
-      if (!swingUsed &&
-          speed >= minimumSpeed &&
-          now - lastHit >= HIT_COOLDOWN_MS) {
-        for (let i = 0; i < roaches.length; i++) {
-          const roach = roaches[i];
-
-          // Roaches are visible/hittable once they enter the screen.
-          if (roach.x < 0 || roach.x > width ||
-              roach.y < playTop() || roach.y > height) {
-            continue;
-          }
-
-          if (distanceToSegment(
-            roach, previousPoint, current
-          ) <= roachRadius() + 14) {
-            const points = roach.golden ? 30 : 10;
-            const hitX = roach.x;
-            const hitY = roach.y;
-            const golden = roach.golden;
-
-            score += points;
-            lastHit = now;
-            swingUsed = true;
-            roaches.splice(i, 1);
-
-            splats.push({
-              x: hitX,
-              y: hitY,
-              golden,
-              started: now
-            });
-
-            scatterNearby(hitX, hitY);
-
-            message.textContent = `+${points} SMASH!`;
-            message.style.opacity = "1";
-            messageUntil = now + 400;
-            updateHud();
-            break;
-          }
-        }
-      }
-
-      previousPoint = current;
-      previousTime = now;
-    });
-
-    function releasePointer(event) {
-      if (event.pointerId !== activePointerId) return;
-
-      activePointerId = null;
-      previousPoint = null;
-      previousTime = null;
-      swingUsed = false;
-    }
-
-    canvas.addEventListener("pointerup", releasePointer);
-    canvas.addEventListener("pointercancel", releasePointer);
-    canvas.addEventListener("lostpointercapture", releasePointer);
-
-    function drawRoach(roach) {
-      const radius = roachRadius();
-      const x = roach.x;
-      const y = roach.y;
-
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = "#2a1519";
-
-      for (const offset of [-0.5, 0, 0.5]) {
-        ctx.beginPath();
-        ctx.moveTo(x - radius * 0.6, y + radius * offset);
-        ctx.lineTo(x - radius * 1.3, y + radius * offset * 1.5);
-        ctx.moveTo(x + radius * 0.6, y + radius * offset);
-        ctx.lineTo(x + radius * 1.3, y + radius * offset * 1.5);
-        ctx.stroke();
-      }
-
-      ctx.fillStyle = "#2a1519";
-      ctx.beginPath();
-      ctx.ellipse(x, y, radius, radius * 0.85, 0, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.fillStyle = roach.golden ? "#ffda4b" : "#bc6843";
-      ctx.beginPath();
-      ctx.ellipse(
-        x, y, radius * 0.78, radius * 0.7,
-        0, 0, Math.PI * 2
-      );
-      ctx.fill();
-
-      ctx.fillStyle = "white";
-      for (const offset of [-0.3, 0.3]) {
-        ctx.beginPath();
-        ctx.arc(
-          x + radius * offset,
-          y - radius * 0.25,
-          radius * 0.13,
-          0,
-          Math.PI * 2
-        );
-        ctx.fill();
-      }
-    }
-
-    function drawSplat(splat, now) {
-      const progress = (now - splat.started) / SPLAT_DURATION_MS;
-      if (progress < 0 || progress >= 1) return;
-
-      ctx.strokeStyle = splat.golden ? "#ffda4b" : "#ff6973";
-      ctx.lineWidth = Math.max(1, 5 * (1 - progress));
-      ctx.beginPath();
-      ctx.arc(
-        splat.x,
-        splat.y,
-        12 + progress * 45,
-        0,
-        Math.PI * 2
-      );
-      ctx.stroke();
-    }
-
-    function frame(now) {
-      const dt = Math.min((now - lastFrame) / 1000, 0.05);
-      lastFrame = now;
-
-      if (state === "playing" && !document.hidden) {
-        secondsLeft = Math.max(0, secondsLeft - dt);
-        swarmClock += dt;
-
-        while (swarmClock >= SWARM_INTERVAL) {
-          swarmClock -= SWARM_INTERVAL;
-          spawnSwarm();
-        }
-
-        for (let i = roaches.length - 1; i >= 0; i--) {
-          const roach = roaches[i];
-          roach.age += dt;
-
-          if (roach.scatterLeft > 0) {
-            roach.scatterLeft = Math.max(
-              0, roach.scatterLeft - dt
-            );
-
-            // Gradually regroup into the swarm's original direction.
-            const recovery = Math.min(1, dt * 2.7);
-            roach.vx += (roach.homeVx - roach.vx) * recovery;
-            roach.vy += (roach.homeVy - roach.vy) * recovery;
-          } else {
-            // A small side-to-side crawl without breaking the group.
-            const wiggle = Math.sin(roach.age * 5 + i) * dt * 9;
-            if (Math.abs(roach.homeVx) > Math.abs(roach.homeVy)) {
-              roach.y += wiggle;
-            } else {
-              roach.x += wiggle;
-            }
-          }
-
-          roach.x += roach.vx * dt;
-          roach.y += roach.vy * dt;
-
-          const margin = roachRadius() * 1.5;
-
-          if (roach.x < -margin ||
-              roach.x > width + margin ||
-              roach.y < playTop() - margin ||
-              roach.y > height + margin) {
-            roaches.splice(i, 1);
-            lives -= 1;
-          }
-        }
-
-        splats = splats.filter(
-          splat => now - splat.started < SPLAT_DURATION_MS
-        );
-
-        if (now >= messageUntil) {
-          message.style.opacity = "0";
-        }
-
-        updateHud();
-
-        if (secondsLeft <= 0 || lives <= 0) {
-          endGame();
-        }
-      }
-
-      ctx.clearRect(0, 0, width, height);
-
-      if (state === "playing") {
-        for (const roach of roaches) {
-          drawRoach(roach);
-        }
-        for (const splat of splats) {
-          drawSplat(splat, now);
-        }
-      }
-
-      requestAnimationFrame(frame);
-    }
-
-    requestAnimationFrame(frame);
-
-    window.addEventListener("pagehide", () => {
-      if (stream) {
-        for (const track of stream.getTracks()) {
-          track.stop();
-        }
-        stream = null;
-      }
-    });
-  </script>
-</body>
-</html>
+      const minimum
