@@ -6,7 +6,7 @@
     name="viewport"
     content="width=device-width, initial-scale=1, viewport-fit=cover"
   >
-  <title>ROACH SMASH! — Camera Game</title>
+  <title>ROACH SMASH! — Camera Edition</title>
 
   <style>
     * {
@@ -83,7 +83,7 @@
       align-items: center;
       justify-content: center;
       padding: 24px;
-      background: rgba(17, 13, 29, 0.82);
+      background: rgba(17, 13, 29, 0.84);
       text-align: center;
     }
 
@@ -115,7 +115,6 @@
       color: #161323;
       font-size: 23px;
       font-weight: bold;
-      cursor: pointer;
     }
 
     button:disabled {
@@ -148,8 +147,8 @@
     <div id="panel">
       <h1 id="panel-title">ROACH SMASH!</h1>
       <p id="panel-description">
-        Roaches appear across your camera view. Swipe quickly across
-        them to smash them! Nearby roaches scatter after a hit.
+        Find the roaches scattered over your camera view.
+        Swipe quickly across them to smash them!
       </p>
       <p id="status">
         Tap START and allow camera access.
@@ -185,6 +184,22 @@
     const SPLAT_DURATION_MS = 450;
     const SCATTER_DURATION = 0.65;
 
+    // Upload roach.png beside this HTML file.
+    const roachImage = new Image();
+    let roachImageReady = false;
+
+    roachImage.onload = () => {
+      roachImageReady = true;
+    };
+
+    roachImage.onerror = () => {
+      console.warn(
+        "Could not load roach.png. Check its filename and repository location."
+      );
+    };
+
+    roachImage.src = "roach.png";
+
     let width = 0;
     let height = 0;
     let stream = null;
@@ -204,18 +219,6 @@
     let lastHit = -HIT_COOLDOWN_MS;
     let messageUntil = 0;
     let lastFrame = performance.now();
-
-    function randomBetween(min, max) {
-      return min + Math.random() * (max - min);
-    }
-
-    function playTop() {
-      return Math.min(120, height * 0.22);
-    }
-
-    function roachRadius() {
-      return Math.max(18, Math.min(width, height) * 0.043);
-    }
 
     function resize() {
       const oldWidth = width;
@@ -252,30 +255,42 @@
     window.addEventListener("resize", resize);
     resize();
 
+    function playTop() {
+      return Math.min(120, height * 0.22);
+    }
+
+    function roachRadius() {
+      return Math.max(18, Math.min(width, height) * 0.043);
+    }
+
+    function randomBetween(min, max) {
+      return min + Math.random() * (max - min);
+    }
+
     function updateHud() {
       scoreText.textContent = `Score: ${score}`;
       timerText.textContent = `${Math.ceil(secondsLeft)}s`;
       livesText.textContent = `Lives: ${Math.max(0, lives)}`;
     }
 
-    function spawnSpreadOutRoaches() {
+    function spawnSwarm() {
       const available = MAX_ROACHES - roaches.length;
       if (available <= 0) return;
 
       const radius = roachRadius();
       const top = playTop();
-      const bottom = height - radius - 12;
+      const bottom = height - radius * 2;
 
-      if (width < radius * 4 || bottom < top + radius * 3) {
+      if (width < radius * 4 || bottom <= top + radius * 2) {
         return;
       }
 
+      // Distribute new roaches across screen regions rather than
+      // sending them all in from one edge.
       const count = Math.min(
         available,
         Math.floor(randomBetween(3, 6))
       );
-
-      // Divide the play area into cells so new roaches start apart.
       const columns = Math.ceil(Math.sqrt(count));
       const rows = Math.ceil(count / columns);
       const cellWidth = width / columns;
@@ -302,12 +317,12 @@
         );
 
         const angle = randomBetween(0, Math.PI * 2);
-        const movementSpeed = Math.max(
+        const speed = Math.max(
           35,
           Math.min(width, height) * randomBetween(0.09, 0.15)
         );
-        const vx = Math.cos(angle) * movementSpeed;
-        const vy = Math.sin(angle) * movementSpeed;
+        const vx = Math.cos(angle) * speed;
+        const vy = Math.sin(angle) * speed;
 
         roaches.push({
           x,
@@ -324,14 +339,12 @@
     }
 
     async function startCamera() {
-      if (stream && stream.getVideoTracks().some(
-        track => track.readyState === "live"
-      )) {
-        return;
-      }
+      if (stream) return;
 
-      if (!window.isSecureContext ||
-          !navigator.mediaDevices?.getUserMedia) {
+      if (
+        !window.isSecureContext ||
+        !navigator.mediaDevices?.getUserMedia
+      ) {
         throw new Error(
           "Camera access requires HTTPS and a supported browser. " +
           "Open the GitHub Pages link directly on your device."
@@ -357,7 +370,6 @@
       spawnClock = 0;
       roaches = [];
       splats = [];
-
       activePointerId = null;
       previousPoint = null;
       previousTime = null;
@@ -365,7 +377,7 @@
       lastHit = -HIT_COOLDOWN_MS;
       message.style.opacity = "0";
 
-      spawnSpreadOutRoaches();
+      spawnSwarm();
       updateHud();
       overlay.classList.add("hidden");
     }
@@ -378,8 +390,7 @@
       panelDescription.textContent =
         `Final score: ${score}. Tap below to play again.`;
       statusText.textContent =
-        "These roaches are overlaid on the camera image; " +
-        "they are not anchored to the room.";
+        "Roaches are overlaid on the camera view, not anchored to the room.";
       startButton.textContent = "PLAY AGAIN";
       overlay.classList.remove("hidden");
     }
@@ -403,7 +414,6 @@
 
     function pointFromEvent(event) {
       const rect = canvas.getBoundingClientRect();
-
       return {
         x: event.clientX - rect.left,
         y: event.clientY - rect.top
@@ -416,7 +426,10 @@
       const lengthSquared = dx * dx + dy * dy;
 
       if (lengthSquared === 0) {
-        return Math.hypot(point.x - a.x, point.y - a.y);
+        return Math.hypot(
+          point.x - a.x,
+          point.y - a.y
+        );
       }
 
       const amount = Math.max(
@@ -473,8 +486,10 @@
     });
 
     canvas.addEventListener("pointermove", (event) => {
-      if (state !== "playing" ||
-          event.pointerId !== activePointerId) {
+      if (
+        state !== "playing" ||
+        event.pointerId !== activePointerId
+      ) {
         return;
       }
 
@@ -491,7 +506,10 @@
 
       const elapsedMs = now - previousTime;
 
-      if (elapsedMs <= 0 || elapsedMs > MAX_SAMPLE_GAP_MS) {
+      if (
+        elapsedMs <= 0 ||
+        elapsedMs > MAX_SAMPLE_GAP_MS
+      ) {
         previousPoint = current;
         previousTime = now;
         return;
@@ -502,4 +520,255 @@
         current.y - previousPoint.y
       );
       const speed = movement / (elapsedMs / 1000);
-      const minimum
+      const minimumSpeed = Math.max(
+        300,
+        Math.min(width, height) * 1.8
+      );
+
+      if (
+        !swingUsed &&
+        speed >= minimumSpeed &&
+        now - lastHit >= HIT_COOLDOWN_MS
+      ) {
+        for (let i = 0; i < roaches.length; i++) {
+          const roach = roaches[i];
+
+          if (
+            roach.x < 0 ||
+            roach.x > width ||
+            roach.y < playTop() ||
+            roach.y > height
+          ) {
+            continue;
+          }
+
+          if (
+            distanceToSegment(
+              roach,
+              previousPoint,
+              current
+            ) <= roachRadius() + 14
+          ) {
+            const points = roach.golden ? 30 : 10;
+            const hitX = roach.x;
+            const hitY = roach.y;
+            const golden = roach.golden;
+
+            score += points;
+            lastHit = now;
+            swingUsed = true;
+            roaches.splice(i, 1);
+
+            splats.push({
+              x: hitX,
+              y: hitY,
+              golden,
+              started: now
+            });
+
+            scatterNearby(hitX, hitY);
+
+            message.textContent = `+${points} SMASH!`;
+            message.style.opacity = "1";
+            messageUntil = now + 400;
+            updateHud();
+            break;
+          }
+        }
+      }
+
+      previousPoint = current;
+      previousTime = now;
+    });
+
+    function releasePointer(event) {
+      if (event.pointerId !== activePointerId) return;
+
+      activePointerId = null;
+      previousPoint = null;
+      previousTime = null;
+      swingUsed = false;
+    }
+
+    canvas.addEventListener("pointerup", releasePointer);
+    canvas.addEventListener("pointercancel", releasePointer);
+    canvas.addEventListener("lostpointercapture", releasePointer);
+
+    function drawRoach(roach) {
+      const radius = roachRadius();
+      const diameter = radius * 2;
+      const x = roach.x;
+      const y = roach.y;
+
+      if (roach.golden) {
+        ctx.fillStyle = "rgba(255, 218, 75, 0.75)";
+        ctx.beginPath();
+        ctx.arc(x, y, radius * 1.17, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      if (roachImageReady) {
+        // Rotate the artwork to face the direction of movement.
+        // If your PNG already faces right, change the -Math.PI / 2
+        // below to 0.
+        const angle = Math.atan2(roach.vy, roach.vx) - Math.PI / 2;
+
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(angle);
+
+        if (roach.golden) {
+          ctx.filter = "sepia(1) saturate(5) hue-rotate(350deg)";
+        }
+
+        ctx.drawImage(
+          roachImage,
+          -radius,
+          -radius,
+          diameter,
+          diameter
+        );
+
+        ctx.restore();
+      } else {
+        // Placeholder remains visible if the image has not loaded.
+        ctx.fillStyle = roach.golden ? "#ffda4b" : "#bc6843";
+        ctx.beginPath();
+        ctx.arc(x, y, radius * 0.8, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    function drawSplat(splat, now) {
+      const progress =
+        (now - splat.started) / SPLAT_DURATION_MS;
+
+      if (progress < 0 || progress >= 1) return;
+
+      ctx.strokeStyle = splat.golden
+        ? "#ffda4b"
+        : "#ff6973";
+      ctx.lineWidth = Math.max(
+        1,
+        5 * (1 - progress)
+      );
+
+      ctx.beginPath();
+      ctx.arc(
+        splat.x,
+        splat.y,
+        12 + progress * 45,
+        0,
+        Math.PI * 2
+      );
+      ctx.stroke();
+    }
+
+    function frame(now) {
+      const dt = Math.min(
+        (now - lastFrame) / 1000,
+        0.05
+      );
+      lastFrame = now;
+
+      if (state === "playing" && !document.hidden) {
+        secondsLeft = Math.max(
+          0,
+          secondsLeft - dt
+        );
+        spawnClock += dt;
+
+        while (spawnClock >= SPAWN_INTERVAL) {
+          spawnClock -= SPAWN_INTERVAL;
+          spawnSwarm();
+        }
+
+        for (let i = roaches.length - 1; i >= 0; i--) {
+          const roach = roaches[i];
+          roach.age += dt;
+
+          if (roach.scatterLeft > 0) {
+            roach.scatterLeft = Math.max(
+              0,
+              roach.scatterLeft - dt
+            );
+
+            const recovery = Math.min(1, dt * 2.7);
+            roach.vx +=
+              (roach.homeVx - roach.vx) * recovery;
+            roach.vy +=
+              (roach.homeVy - roach.vy) * recovery;
+          } else {
+            const wiggle =
+              Math.sin(roach.age * 5 + i) * dt * 9;
+
+            if (
+              Math.abs(roach.homeVx) >
+              Math.abs(roach.homeVy)
+            ) {
+              roach.y += wiggle;
+            } else {
+              roach.x += wiggle;
+            }
+          }
+
+          roach.x += roach.vx * dt;
+          roach.y += roach.vy * dt;
+
+          const margin = roachRadius() * 1.5;
+
+          if (
+            roach.x < -margin ||
+            roach.x > width + margin ||
+            roach.y < playTop() - margin ||
+            roach.y > height + margin
+          ) {
+            roaches.splice(i, 1);
+            lives -= 1;
+          }
+        }
+
+        splats = splats.filter(
+          splat =>
+            now - splat.started < SPLAT_DURATION_MS
+        );
+
+        if (now >= messageUntil) {
+          message.style.opacity = "0";
+        }
+
+        updateHud();
+
+        if (secondsLeft <= 0 || lives <= 0) {
+          endGame();
+        }
+      }
+
+      ctx.clearRect(0, 0, width, height);
+
+      if (state === "playing") {
+        for (const roach of roaches) {
+          drawRoach(roach);
+        }
+
+        for (const splat of splats) {
+          drawSplat(splat, now);
+        }
+      }
+
+      requestAnimationFrame(frame);
+    }
+
+    requestAnimationFrame(frame);
+
+    window.addEventListener("pagehide", () => {
+      if (stream) {
+        for (const track of stream.getTracks()) {
+          track.stop();
+        }
+        stream = null;
+      }
+    });
+  </script>
+</body>
+</html>
