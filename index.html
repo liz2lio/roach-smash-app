@@ -53,7 +53,7 @@
       justify-content: space-between;
       gap: 8px;
       padding: calc(12px + env(safe-area-inset-top)) 14px 12px;
-      background: rgba(20, 15, 35, 0.78);
+      background: rgba(20, 15, 35, 0.8);
       font-size: clamp(16px, 4vw, 26px);
       font-weight: bold;
       pointer-events: none;
@@ -67,12 +67,31 @@
       transform: translateX(-50%);
       padding: 8px 16px;
       border-radius: 12px;
-      background: rgba(20, 15, 35, 0.85);
+      background: rgba(20, 15, 35, 0.9);
       color: #ffda4b;
       font-size: 26px;
       font-weight: bold;
       pointer-events: none;
       opacity: 0;
+    }
+
+    #sound-control {
+      position: fixed;
+      right: 12px;
+      bottom: calc(12px + env(safe-area-inset-bottom));
+      z-index: 3;
+      padding: 10px 14px;
+      border-radius: 10px;
+      background: rgba(20, 15, 35, 0.9);
+      color: white;
+      font-size: 18px;
+      font-weight: bold;
+    }
+
+    #sound-control input {
+      width: 20px;
+      height: 20px;
+      vertical-align: middle;
     }
 
     #overlay {
@@ -83,7 +102,7 @@
       align-items: center;
       justify-content: center;
       padding: 24px;
-      background: rgba(17, 13, 29, 0.84);
+      background: rgba(17, 13, 29, 0.85);
       text-align: center;
     }
 
@@ -115,6 +134,7 @@
       color: #161323;
       font-size: 23px;
       font-weight: bold;
+      cursor: pointer;
     }
 
     button:disabled {
@@ -143,16 +163,19 @@
 
   <div id="message"></div>
 
+  <label id="sound-control">
+    <input id="sound-enabled" type="checkbox" checked>
+    Sound
+  </label>
+
   <div id="overlay">
     <div id="panel">
       <h1 id="panel-title">ROACH SMASH!</h1>
       <p id="panel-description">
-        Find the roaches scattered over your camera view.
-        Swipe quickly across them to smash them!
+        Different-sized roaches are scattered across your camera view.
+        Swipe quickly through one to smash it!
       </p>
-      <p id="status">
-        Tap START and allow camera access.
-      </p>
+      <p id="status">Tap START and allow camera access.</p>
       <button id="start-button" type="button">START</button>
     </div>
   </div>
@@ -174,17 +197,18 @@
     const timerText = document.getElementById("timer");
     const livesText = document.getElementById("lives");
     const message = document.getElementById("message");
+    const soundEnabled = document.getElementById("sound-enabled");
 
     const ROUND_SECONDS = 60;
     const STARTING_LIVES = 3;
     const SPAWN_INTERVAL = 4.2;
     const MAX_ROACHES = 12;
+    const ROACH_LIFETIME = 11;
     const HIT_COOLDOWN_MS = 300;
     const MAX_SAMPLE_GAP_MS = 180;
     const SPLAT_DURATION_MS = 450;
     const SCATTER_DURATION = 0.65;
 
-    // Upload roach.png beside this HTML file.
     const roachImage = new Image();
     let roachImageReady = false;
 
@@ -194,11 +218,82 @@
 
     roachImage.onerror = () => {
       console.warn(
-        "Could not load roach.png. Check its filename and repository location."
+        "Could not load roach.png. Check its name and location."
       );
     };
 
     roachImage.src = "roach.png";
+
+    let audioContext = null;
+
+    function unlockAudio() {
+      if (!soundEnabled.checked) return;
+
+      try {
+        const AudioContextClass =
+          window.AudioContext || window.webkitAudioContext;
+
+        if (!AudioContextClass) return;
+
+        if (audioContext === null) {
+          audioContext = new AudioContextClass();
+        }
+
+        if (audioContext.state === "suspended") {
+          audioContext.resume().catch(() => {});
+        }
+      } catch (error) {
+        console.warn("Audio unavailable:", error);
+      }
+    }
+
+    function playSmashSound(golden) {
+      if (
+        !soundEnabled.checked ||
+        audioContext === null ||
+        audioContext.state !== "running"
+      ) {
+        return;
+      }
+
+      try {
+        const start = audioContext.currentTime;
+        const oscillator = audioContext.createOscillator();
+        const volume = audioContext.createGain();
+
+        oscillator.type = golden ? "sine" : "triangle";
+        oscillator.frequency.setValueAtTime(
+          golden ? 650 : 280,
+          start
+        );
+        oscillator.frequency.exponentialRampToValueAtTime(
+          golden ? 260 : 85,
+          start + 0.16
+        );
+
+        volume.gain.setValueAtTime(0.001, start);
+        volume.gain.linearRampToValueAtTime(
+          0.18,
+          start + 0.012
+        );
+        volume.gain.exponentialRampToValueAtTime(
+          0.001,
+          start + 0.18
+        );
+
+        oscillator.connect(volume);
+        volume.connect(audioContext.destination);
+
+        oscillator.start(start);
+        oscillator.stop(start + 0.18);
+      } catch (error) {
+        console.warn("Could not play sound:", error);
+      }
+    }
+
+    soundEnabled.addEventListener("change", () => {
+      if (soundEnabled.checked) unlockAudio();
+    });
 
     let width = 0;
     let height = 0;
@@ -219,6 +314,26 @@
     let lastHit = -HIT_COOLDOWN_MS;
     let messageUntil = 0;
     let lastFrame = performance.now();
+
+    function randomBetween(min, max) {
+      return min + Math.random() * (max - min);
+    }
+
+    function playTop() {
+      return Math.min(120, height * 0.22);
+    }
+
+    function baseRoachRadius() {
+      return Math.max(18, Math.min(width, height) * 0.043);
+    }
+
+    function newSizeMultiplier() {
+      const chance = Math.random();
+
+      if (chance < 0.30) return 0.75; // Small
+      if (chance < 0.75) return 1.0;  // Medium
+      return 1.55;                    // Large
+    }
 
     function resize() {
       const oldWidth = width;
@@ -255,18 +370,6 @@
     window.addEventListener("resize", resize);
     resize();
 
-    function playTop() {
-      return Math.min(120, height * 0.22);
-    }
-
-    function roachRadius() {
-      return Math.max(18, Math.min(width, height) * 0.043);
-    }
-
-    function randomBetween(min, max) {
-      return min + Math.random() * (max - min);
-    }
-
     function updateHud() {
       scoreText.textContent = `Score: ${score}`;
       timerText.textContent = `${Math.ceil(secondsLeft)}s`;
@@ -277,16 +380,13 @@
       const available = MAX_ROACHES - roaches.length;
       if (available <= 0) return;
 
-      const radius = roachRadius();
+      const base = baseRoachRadius();
       const top = playTop();
-      const bottom = height - radius * 2;
 
-      if (width < radius * 4 || bottom <= top + radius * 2) {
+      if (width < base * 5 || height - top < base * 5) {
         return;
       }
 
-      // Distribute new roaches across screen regions rather than
-      // sending them all in from one edge.
       const count = Math.min(
         available,
         Math.floor(randomBetween(3, 6))
@@ -294,9 +394,11 @@
       const columns = Math.ceil(Math.sqrt(count));
       const rows = Math.ceil(count / columns);
       const cellWidth = width / columns;
-      const cellHeight = (bottom - top) / rows;
+      const cellHeight = (height - top) / rows;
 
       for (let i = 0; i < count; i++) {
+        const size = newSizeMultiplier();
+        const radius = base * size;
         const column = i % columns;
         const row = Math.floor(i / columns);
 
@@ -311,18 +413,18 @@
         const y = Math.max(
           top + radius,
           Math.min(
-            bottom - radius,
+            height - radius,
             top + (row + randomBetween(0.25, 0.75)) * cellHeight
           )
         );
 
         const angle = randomBetween(0, Math.PI * 2);
-        const speed = Math.max(
+        const movementSpeed = Math.max(
           35,
           Math.min(width, height) * randomBetween(0.09, 0.15)
         );
-        const vx = Math.cos(angle) * speed;
-        const vy = Math.sin(angle) * speed;
+        const vx = Math.cos(angle) * movementSpeed;
+        const vy = Math.sin(angle) * movementSpeed;
 
         roaches.push({
           x,
@@ -331,6 +433,7 @@
           vy,
           homeVx: vx,
           homeVy: vy,
+          size,
           scatterLeft: 0,
           age: 0,
           golden: Math.random() < 0.15
@@ -339,7 +442,11 @@
     }
 
     async function startCamera() {
-      if (stream) return;
+      if (stream && stream.getVideoTracks().some(
+        track => track.readyState === "live"
+      )) {
+        return;
+      }
 
       if (
         !window.isSecureContext ||
@@ -351,15 +458,22 @@
         );
       }
 
-      stream = await navigator.mediaDevices.getUserMedia({
+      const newStream = await navigator.mediaDevices.getUserMedia({
         audio: false,
         video: {
           facingMode: { ideal: "environment" }
         }
       });
 
-      video.srcObject = stream;
-      await video.play();
+      try {
+        video.srcObject = newStream;
+        await video.play();
+        stream = newStream;
+      } catch (error) {
+        newStream.getTracks().forEach(track => track.stop());
+        video.srcObject = null;
+        throw error;
+      }
     }
 
     function startGame() {
@@ -396,6 +510,9 @@
     }
 
     startButton.addEventListener("click", async () => {
+      // Unlock audio directly from the tap, before awaiting camera access.
+      unlockAudio();
+
       startButton.disabled = true;
       statusText.textContent = "Opening camera...";
 
@@ -414,6 +531,7 @@
 
     function pointFromEvent(event) {
       const rect = canvas.getBoundingClientRect();
+
       return {
         x: event.clientX - rect.left,
         y: event.clientY - rect.top
@@ -450,7 +568,7 @@
     }
 
     function scatterNearby(hitX, hitY) {
-      const range = roachRadius() * 6;
+      const range = baseRoachRadius() * 6;
       const impulse = Math.max(
         90,
         Math.min(width, height) * 0.38
@@ -474,7 +592,7 @@
       }
     }
 
-    canvas.addEventListener("pointerdown", (event) => {
+    canvas.addEventListener("pointerdown", event => {
       if (state !== "playing" || activePointerId !== null) return;
 
       event.preventDefault();
@@ -485,7 +603,7 @@
       swingUsed = false;
     });
 
-    canvas.addEventListener("pointermove", (event) => {
+    canvas.addEventListener("pointermove", event => {
       if (
         state !== "playing" ||
         event.pointerId !== activePointerId
@@ -506,10 +624,7 @@
 
       const elapsedMs = now - previousTime;
 
-      if (
-        elapsedMs <= 0 ||
-        elapsedMs > MAX_SAMPLE_GAP_MS
-      ) {
+      if (elapsedMs <= 0 || elapsedMs > MAX_SAMPLE_GAP_MS) {
         previousPoint = current;
         previousTime = now;
         return;
@@ -532,48 +647,45 @@
       ) {
         for (let i = 0; i < roaches.length; i++) {
           const roach = roaches[i];
-
-          if (
-            roach.x < 0 ||
-            roach.x > width ||
-            roach.y < playTop() ||
-            roach.y > height
-          ) {
-            continue;
-          }
+          const radius = baseRoachRadius() * roach.size;
 
           if (
             distanceToSegment(
               roach,
               previousPoint,
               current
-            ) <= roachRadius() + 14
+            ) > radius + 14
           ) {
-            const points = roach.golden ? 30 : 10;
-            const hitX = roach.x;
-            const hitY = roach.y;
-            const golden = roach.golden;
-
-            score += points;
-            lastHit = now;
-            swingUsed = true;
-            roaches.splice(i, 1);
-
-            splats.push({
-              x: hitX,
-              y: hitY,
-              golden,
-              started: now
-            });
-
-            scatterNearby(hitX, hitY);
-
-            message.textContent = `+${points} SMASH!`;
-            message.style.opacity = "1";
-            messageUntil = now + 400;
-            updateHud();
-            break;
+            continue;
           }
+
+          const points = roach.golden ? 30 : 10;
+          const hitX = roach.x;
+          const hitY = roach.y;
+          const golden = roach.golden;
+
+          score += points;
+          lastHit = now;
+          swingUsed = true;
+          roaches.splice(i, 1);
+
+          splats.push({
+            x: hitX,
+            y: hitY,
+            golden,
+            size: roach.size,
+            started: now
+          });
+
+          scatterNearby(hitX, hitY);
+          playSmashSound(golden);
+
+          message.textContent = `+${points} SMASH!`;
+          message.style.opacity = "1";
+          messageUntil = now + 400;
+
+          updateHud();
+          break;
         }
       }
 
@@ -595,26 +707,29 @@
     canvas.addEventListener("lostpointercapture", releasePointer);
 
     function drawRoach(roach) {
-      const radius = roachRadius();
+      const radius = baseRoachRadius() * roach.size;
       const diameter = radius * 2;
-      const x = roach.x;
-      const y = roach.y;
 
       if (roach.golden) {
         ctx.fillStyle = "rgba(255, 218, 75, 0.75)";
         ctx.beginPath();
-        ctx.arc(x, y, radius * 1.17, 0, Math.PI * 2);
+        ctx.arc(
+          roach.x,
+          roach.y,
+          radius * 1.17,
+          0,
+          Math.PI * 2
+        );
         ctx.fill();
       }
 
       if (roachImageReady) {
-        // Rotate the artwork to face the direction of movement.
-        // If your PNG already faces right, change the -Math.PI / 2
-        // below to 0.
-        const angle = Math.atan2(roach.vy, roach.vx) - Math.PI / 2;
+        // Assumes the roach in roach.png faces upward.
+        const angle =
+          Math.atan2(roach.vy, roach.vx) - Math.PI / 2;
 
         ctx.save();
-        ctx.translate(x, y);
+        ctx.translate(roach.x, roach.y);
         ctx.rotate(angle);
 
         if (roach.golden) {
@@ -631,10 +746,16 @@
 
         ctx.restore();
       } else {
-        // Placeholder remains visible if the image has not loaded.
+        // Fallback if roach.png has not loaded.
         ctx.fillStyle = roach.golden ? "#ffda4b" : "#bc6843";
         ctx.beginPath();
-        ctx.arc(x, y, radius * 0.8, 0, Math.PI * 2);
+        ctx.arc(
+          roach.x,
+          roach.y,
+          radius * 0.8,
+          0,
+          Math.PI * 2
+        );
         ctx.fill();
       }
     }
@@ -648,16 +769,13 @@
       ctx.strokeStyle = splat.golden
         ? "#ffda4b"
         : "#ff6973";
-      ctx.lineWidth = Math.max(
-        1,
-        5 * (1 - progress)
-      );
+      ctx.lineWidth = Math.max(1, 5 * (1 - progress));
 
       ctx.beginPath();
       ctx.arc(
         splat.x,
         splat.y,
-        12 + progress * 45,
+        (12 + progress * 45) * splat.size,
         0,
         Math.PI * 2
       );
@@ -672,10 +790,7 @@
       lastFrame = now;
 
       if (state === "playing" && !document.hidden) {
-        secondsLeft = Math.max(
-          0,
-          secondsLeft - dt
-        );
+        secondsLeft = Math.max(0, secondsLeft - dt);
         spawnClock += dt;
 
         while (spawnClock >= SPAWN_INTERVAL) {
@@ -715,14 +830,32 @@
           roach.x += roach.vx * dt;
           roach.y += roach.vy * dt;
 
-          const margin = roachRadius() * 1.5;
+          const radius = baseRoachRadius() * roach.size;
+          const top = playTop();
 
-          if (
-            roach.x < -margin ||
-            roach.x > width + margin ||
-            roach.y < playTop() - margin ||
-            roach.y > height + margin
-          ) {
+          // Roaches crawl within the screen. An unsmashed roach
+          // escapes after its lifetime expires and costs one life.
+          if (roach.x < radius) {
+            roach.x = radius;
+            roach.vx = Math.abs(roach.vx);
+            roach.homeVx = Math.abs(roach.homeVx);
+          } else if (roach.x > width - radius) {
+            roach.x = width - radius;
+            roach.vx = -Math.abs(roach.vx);
+            roach.homeVx = -Math.abs(roach.homeVx);
+          }
+
+          if (roach.y < top + radius) {
+            roach.y = top + radius;
+            roach.vy = Math.abs(roach.vy);
+            roach.homeVy = Math.abs(roach.homeVy);
+          } else if (roach.y > height - radius) {
+            roach.y = height - radius;
+            roach.vy = -Math.abs(roach.vy);
+            roach.homeVy = -Math.abs(roach.homeVy);
+          }
+
+          if (roach.age >= ROACH_LIFETIME) {
             roaches.splice(i, 1);
             lives -= 1;
           }
@@ -763,9 +896,7 @@
 
     window.addEventListener("pagehide", () => {
       if (stream) {
-        for (const track of stream.getTracks()) {
-          track.stop();
-        }
+        stream.getTracks().forEach(track => track.stop());
         stream = null;
       }
     });
